@@ -17,6 +17,7 @@ from pandas_datareader import data as pdr
 import yfinance as yf
 from alpha_vantage.timeseries import TimeSeries
 from alpha_vantage.foreignexchange import ForeignExchange
+import finnhub
 
 from settings import (
     path_macro,
@@ -180,10 +181,44 @@ def fetch_alpha_vantage_stock(
     return df
 
 
+def fetch_finnhub_stock(
+    symbol: str,
+    start: str,
+    end: str,
+    api_key: str,
+) -> pd.DataFrame:
+    """Download daily OHLC data from Finnhub for *symbol*.
+
+    The resulting dataframe contains the columns ``open``, ``high``, ``low``,
+    ``close`` and ``volume``.
+    """
+    client = finnhub.Client(api_key=api_key)
+    start_ts = int(pd.Timestamp(start).timestamp())
+    end_ts = int(pd.Timestamp(end).timestamp())
+    data = client.stock_candles(symbol, "D", start_ts, end_ts)
+    if data.get("s") != "ok":
+        raise ValueError(f"Finnhub returned status {data.get('s')}")
+    df = pd.DataFrame(
+        {
+            "open": data["o"],
+            "high": data["h"],
+            "low": data["l"],
+            "close": data["c"],
+            "volume": data["v"],
+        },
+        index=pd.to_datetime(data["t"], unit="s"),
+    )
+    df.index.name = "date"
+    file_path = _ensure_path(path_stocks) / f"{symbol}.csv"
+    df.to_csv(file_path)
+    return df
+
+
 __all__ = [
     "fetch_fred",
     "fetch_yahoo",
     "fetch_ecb_fx",
     "fetch_alpha_vantage_fx",
     "fetch_alpha_vantage_stock",
+    "fetch_finnhub_stock",
 ]
