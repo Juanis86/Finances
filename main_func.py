@@ -10,6 +10,7 @@ import pandas as pd
 import numpy as np
 from datetime import *
 from binance.client import Client
+from global_stocks import get_price_series, save_series_to_csv
 
 
 ############################################################################################################################
@@ -392,21 +393,20 @@ def act_db_csv(path_crypto, path_stocks, path_indexes, path_commodities, path_cu
                     df2.to_csv(path_macro+name+".csv")
                     print(name+"ok")
             elif acciones == True:
+                df1=pd.read_csv(path_stocks+name+".csv")
+                df1=df1.set_index('dateTime')
                 try:
-                    df1=pd.read_csv(path_stocks+name+".csv")
                     curr=api_iol.get_hist_data_iol('bcBA', name, date, date.today(),'argentina', path_stocks, psw_iol=pass_iol, user_iol=user_iol)
-                    df1=df1.set_index('dateTime')
-                    df2=pd.concat([df1, curr], axis=0)
-                    print("saving")
-                    df2.to_csv(path_stocks+name+".csv")
-                    print(name+"ok")
-                except:
-                    df1=pd.read_csv(path_stocks+name+".csv")
-                    curr=api_iol.get_hist_data_iol('bcBA', name, date, date.today(),'estados_unidos', path_stocks, psw_iol=pass_iol, user_iol=user_iol)
-                    df1=df1.set_index('dateTime')
-                    df2=pd.concat([df1, curr], axis=0)
-                    print("saving")
-                    df2.to_csv(path_stocks+name+".csv")
-                    print(name+"ok")
+                except Exception:
+                    try:
+                        curr=api_iol.get_hist_data_iol('bcBA', name, date, date.today(),'estados_unidos', path_stocks, psw_iol=pass_iol, user_iol=user_iol)
+                    except Exception:
+                        curr=get_price_series(name, date, date.today())
+                mask = (curr.index > date)
+                curr=curr.loc[mask]
+                df2=pd.concat([df1, curr], axis=0)
+                print("saving")
+                save_series_to_csv(df2, path_stocks+name+".csv")
+                print(name+"ok")
     print(datetime.now())
             

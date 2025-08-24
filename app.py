@@ -2,6 +2,8 @@ from settings import *
 from main_func import *
 from coingecko_client import fetch_coins_markets
 
+from global_stocks import get_price_series, save_series_to_csv
+
 #Cargo las variables de entorno
 
 
@@ -35,10 +37,36 @@ if __name__== '__main__':
             usd_ars= get_assets("currencies","usd-ars",0,path_currencies)
             usd_bz= get_assets("currencies","usd-brl",1,path_currencies)
           #  usd_10y= get_assets("rates-bonds","u.s.-10-year-bond-yield",0,path_macro)
+            global_symbols = ["AAPL", "MSFT"]
+            for sym in global_symbols:
+                series = get_price_series(sym, "2010-01-01", datetime.now().strftime("%Y-%m-%d"))
+                save_series_to_csv(series, path_stocks / f"{sym}.csv")
             print(start)
             print(datetime.now)
+
     else:
-      act_db_csv(path_crypto,path_stocks, path_indexes, path_commodities, path_currencies, path_macro, pass_iol= PASS_IOL,user_iol= USER_IOL)
-      fetch_coins_markets("usd", 250)
+        act_db_csv(path_crypto,path_stocks, path_indexes, path_commodities, path_currencies, path_macro, pass_iol= PASS_IOL,user_iol= USER_IOL)
+        fetch_coins_markets("usd", 250)
+        # Actualización de las demás bases de datos
+        tmp_macro = path_macro / "_tmp_ignore"
+        os.makedirs(tmp_macro, exist_ok=True)
+        act_db_csv(path_crypto, path_stocks, path_indexes, path_commodities, path_currencies, tmp_macro,
+                   pass_iol=PASS_IOL, user_iol=USER_IOL)
 
+        # Actualización de series macro
+        for serie in MACRO_SERIES:
+            file_path = path_macro / f"{serie['id']}.csv"
+            if file_path.exists():
+                df_existing = pd.read_csv(file_path, parse_dates=['date'])
+                last_date = df_existing['date'].max()
+                if serie['source'] == 'fred':
+                    start_date = (last_date + pd.Timedelta(days=1)).strftime('%Y-%m-%d')
+                    end_date = date.today().strftime('%Y-%m-%d')
+                else:
+                    start_date = str(last_date.year + 1)
+                    end_date = str(date.today().year)
+            else:
+                start_date = serie['start']
+                end_date = date.today().strftime('%Y-%m-%d') if serie['source'] == 'fred' else str(date.today().year)
 
+            fetch_series(serie['id'], start_date, end_date, serie['source'])
