@@ -83,3 +83,84 @@ def fetch_series(series_id: str, start: str, end: str, source: str) -> pd.DataFr
 
     df.to_csv(file_path, index=False)
     return df
+
+
+def fetch_imf_series(dataset: str, series: str, start: str, end: str) -> pd.DataFrame:
+    """Fetch a time series from the IMF SDMX API.
+
+    Parameters
+    ----------
+    dataset : str
+        IMF dataset identifier, e.g. ``"IFS"`` or ``"BOP"``.
+    series : str
+        Series key within the dataset.
+    start : str
+        Start period for the query (``YYYY`` or ``YYYY-MM`` depending on
+        frequency).
+    end : str
+        End period for the query (``YYYY`` or ``YYYY-MM`` depending on
+        frequency).
+
+    Returns
+    -------
+    pandas.DataFrame
+        Time series with two columns: ``date`` and ``value``. The data is also
+        persisted as ``CSV`` within ``path_macro`` using ``dataset`` and
+        ``series`` as file name.
+    """
+
+    base_url = "https://sdmxcentral.imf.org/ws/public/sdmxapi/rest/data"
+    url = f"{base_url}/{dataset}/{series}"
+    params = {"startPeriod": start, "endPeriod": end, "format": "sdmx-json"}
+    response = requests.get(url, params=params, timeout=30)
+    response.raise_for_status()
+    json_data = response.json()
+
+    obs_dims = json_data.get("structure", {}).get("dimensions", {}).get("observation", [])
+    time_values = []
+    for dim in obs_dims:
+        if dim.get("id") == "TIME_PERIOD":
+            time_values = [v.get("id") for v in dim.get("values", [])]
+            break
+
+    data_sets = json_data.get("data", {}).get("dataSets", [])
+    if not data_sets:
+        return pd.DataFrame(columns=["date", "value"])
+
+    series_dict = data_sets[0].get("series", {})
+    if not series_dict:
+        return pd.DataFrame(columns=["date", "value"])
+
+    first_series = next(iter(series_dict.values()))
+    observations = first_series.get("observations", {})
+
+    records = []
+    for idx, val in observations.items():
+        idx = int(idx)
+        if idx < len(time_values):
+            records.append({"date": time_values[idx], "value": val[0] if val else None})
+
+    df = pd.DataFrame(records)
+    if df.empty:
+        return df
+
+    df["date"] = pd.to_datetime(df["date"], errors="coerce")
+    df["value"] = pd.to_numeric(df["value"], errors="coerce")
+    df.dropna(subset=["date", "value"], inplace=True)
+    df.sort_values("date", inplace=True)
+
+    path_macro.mkdir(parents=True, exist_ok=True)
+    file_path = path_macro / f"{dataset}_{series}.csv"
+
+    if file_path.exists():
+        existing = pd.read_csv(file_path)
+        if "date" in existing.columns:
+            existing["date"] = pd.to_datetime(existing["date"])
+        combined = pd.concat([existing, df], ignore_index=True)
+        combined.drop_duplicates(subset="date", inplace=True)
+        combined.sort_values("date", inplace=True)
+        combined.to_csv(file_path, index=False)
+        return combined
+
+    df.to_csv(file_path, index=False)
+    return df
