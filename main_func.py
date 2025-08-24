@@ -2,14 +2,20 @@ from pydoc import cli
 import requests
 import json
 import os
-from datetime import date
+from datetime import date, datetime, timedelta
 import urllib.request
 from bs4 import BeautifulSoup
 import re
 import pandas as pd
 import numpy as np
-from datetime import *
 from binance.client import Client
+from binance.exceptions import BinanceAPIException
+from binance.streams import ThreadedWebsocketManager
+import time
+from global_stocks import get_price_series, save_series_to_csv
+
+# Variables de configuración de la API de IOL
+from settings import URL_TOKEN, URL_API, GRANT_TYPE
 
 
 ############################################################################################################################
@@ -18,103 +24,136 @@ from binance.client import Client
 
 # Genera el token para los request de la API
 
-class iol():
+class iol:
     def __init__(self, user_iol, psw_iol):
-        self.user_iol= user_iol
+        self.user_iol = user_iol
         self.pass_iol = psw_iol
+        self.session = requests.Session()
+        self.token = None
+        self.token_expires_at = datetime.min
 
-    def get_token(self, user_iol, psw_iol,):
-        headers = {'Content-Type': 'application/x-www-form-urlencoded'}
-        body = {'username':  self.user_iol,'password':  self.pass_iol,'grant_type': GRANT_TYPE,}
-        res = requests.post(URL_TOKEN, headers= {'Content-Type': 'application/x-www-form-urlencoded'}
-        , data=body)
-        tk= "Bearer "+res.json()['access_token']
-        return tk
-
-    def check_token(self, user_iol, psw_iol):
-        headers = {'Content-Type': 'application/x-www-form-urlencoded'}
-
+    def get_token(self):
+        """Obtener un nuevo token de autenticación."""
         body = {
-            'username':  self.user_iol,
-            'password':  self.pass_iol,
+            'username': self.user_iol,
+            'password': self.pass_iol,
             'grant_type': GRANT_TYPE,
         }
-        res = requests.post(URL_TOKEN, headers= {'Content-Type': 'application/x-www-form-urlencoded',}
-        , data=body)
-        tk= "Barer "+res.json()['access_token']
-        return tk
+        response = self.session.post(
+            URL_TOKEN,
+            headers={'Content-Type': 'application/x-www-form-urlencoded'},
+            data=body,
+        )
+        response.raise_for_status()
+        data = response.json()
+        self.token = f"Bearer {data['access_token']}"
+        expires_in = data.get('expires_in', 0)
+        self.token_expires_at = datetime.utcnow() + timedelta(seconds=expires_in)
+        return self.token
+
+    def refresh_token(self):
+        """Renovar el token si expiró."""
+        if self.token is None or datetime.utcnow() >= self.token_expires_at - timedelta(seconds=60):
+            self.get_token()
+        return self.token
 
     # Genera una lista con los simbolos de las acciones pertenecientes a un panel
-
-    def get_tickers_panel( self, instrumento, panel, pais, user_iol, psw_iol):
-
-        auth= self.get_token(user_iol, psw_iol)
-
-        simbolos=[]
-        response = requests.get(f'{URL_API}/Cotizaciones/{instrumento}/{panel}/{pais}', headers= {'Content-Type': 'application/x-www-form-urlencoded', 'authorization': auth}
+    def get_tickers_panel(self, instrumento, panel, pais, user_iol=None, psw_iol=None):
+        auth = self.refresh_token()
+        response = self.session.get(
+            f'{URL_API}/Cotizaciones/{instrumento}/{panel}/{pais}',
+            headers={'Content-Type': 'application/x-www-form-urlencoded', 'authorization': auth},
         )
-        dict= json.loads(response.text)
-        for i in dict["titulos"]:
-            simbolos.append(i["simbolo"])
+        response.raise_for_status()
+        data = response.json()
+        simbolos = [i["simbolo"] for i in data.get("titulos", [])]
         return simbolos
 
-    # Genera una tabla con los simbolod de un mercado particular
-
-    def get_asset_iol(self, mercado, simbolo, user_iol):
-        response = requests.get(
-            f'{self.user_iol}/{mercado}/Titulos/{simbolo}', headers= {'Content-Type': 'application/x-www-form-urlencoded'}
+    # Genera una tabla con los simbolos de un mercado particular
+    def get_asset_iol(self, mercado, simbolo, user_iol=None):
+        auth = self.refresh_token()
+        response = self.session.get(
+            f'{URL_API}/{mercado}/Titulos/{simbolo}',
+            headers={'Content-Type': 'application/x-www-form-urlencoded', 'authorization': auth},
         )
-        return json.loads(response.text)
+        response.raise_for_status()
+        return response.json()
 
-    def get_panel(self, instrumento, panel, pais, psw_iol, user_iol):
-        auth= self.check_token(user_iol, psw_iol)
-
-        response = requests.get(
-            f'{URL_API}/Cotizaciones/{instrumento}/{panel}/{pais}', headers= {'Content-Type': 'application/x-www-form-urlencoded', 'authorization': auth}
+    def get_panel(self, instrumento, panel, pais, psw_iol=None, user_iol=None):
+        auth = self.refresh_token()
+        response = self.session.get(
+            f'{URL_API}/Cotizaciones/{instrumento}/{panel}/{pais}',
+            headers={'Content-Type': 'application/x-www-form-urlencoded', 'authorization': auth},
         )
-        res= json.loads(response.text)
+        response.raise_for_status()
+        res = response.json()
         pd.DataFrame(res)
 
     # Genera una tabla con los datos historicos de una acción:
-
-    def get_hist_data_iol(self, mercado, simbolo, desde, hasta,pais, path, psw_iol, user_iol):
-        auth= self.get_token(user_iol, psw_iol)
-        asset= "stock"
-        response = requests.get(
-            f'{URL_API}/{mercado}/Titulos/{simbolo}/Cotizacion/seriehistorica/{desde}/{hasta}/sinajustar', headers= {'Content-Type': 'application/x-www-form-urlencoded', 'authorization': auth}
+    def get_hist_data_iol(self, mercado, simbolo, desde, hasta, pais, path, psw_iol=None, user_iol=None):
+        auth = self.refresh_token()
+        response = self.session.get(
+            f'{URL_API}/{mercado}/Titulos/{simbolo}/Cotizacion/seriehistorica/{desde}/{hasta}/sinajustar',
+            headers={'Content-Type': 'application/x-www-form-urlencoded', 'authorization': auth},
         )
-        res= response.json()
-        asset= "stocks"
+        response.raise_for_status()
+        res = response.json()
         df = pd.DataFrame(res)
-        df= df.iloc[:,:12]
-        df.columns= ["close", "var", "open", "max", "min", "dateTime","trend","opA" ,"pClose", "tradeQ", "volume", "meanp"]
-        df= df.drop(columns=['trend', 'tradeQ','opA', 'pClose', 'meanp'], axis=1)
-        df['dateTime']=df['dateTime'].str.slice(0, 10)
+        df = df.iloc[:, :12]
+        df.columns = ["close", "var", "open", "max", "min", "dateTime", "trend", "opA", "pClose", "tradeQ", "volume", "meanp"]
+        df = df.drop(columns=['trend', 'tradeQ', 'opA', 'pClose', 'meanp'], axis=1)
+        df['dateTime'] = df['dateTime'].str.slice(0, 10)
         df["dateTime"] = pd.to_datetime(df.dateTime)
-        df=df[["close", "var", "open", "max", "min", "dateTime", "volume"]]
-        df['ticker']= (simbolo)
-        df["country"]= (pais)
-        df["asset"]= asset
+        df = df[["close", "var", "open", "max", "min", "dateTime", "volume"]]
+        df['ticker'] = simbolo
+        df["country"] = pais
+        df["asset"] = "stocks"
         df.set_index('dateTime', inplace=True)
-    
         return df
 
-    # Genera una base de datos con las acciones de Argentina o EEUU
+    # Datos intradiarios de un activo
+    def get_intraday_iol(self, mercado, simbolo):
+        auth = self.refresh_token()
+        response = self.session.get(
+            f'{URL_API}/{mercado}/Titulos/{simbolo}/Cotizacion/Intradiaria',
+            headers={'Content-Type': 'application/x-www-form-urlencoded', 'authorization': auth},
+        )
+        response.raise_for_status()
+        return response.json()
 
-    def get_DB_iol(self, instrumento, mercado,panel, pais,   desde,  path, user_iol, pass_iol):
-        activos=[]
-        simbolos=  self.get_tickers_panel(instrumento="acciones", pais=pais, panel=panel,user_iol= user_iol, psw_iol= pass_iol)
+    # Datos fundamentales de un activo
+    def get_fundamentals_iol(self, mercado, simbolo):
+        auth = self.refresh_token()
+        response = self.session.get(
+            f'{URL_API}/{mercado}/Titulos/{simbolo}/Fundamentals',
+            headers={'Content-Type': 'application/x-www-form-urlencoded', 'authorization': auth},
+        )
+        response.raise_for_status()
+        return response.json()
+
+    # Genera una base de datos con las acciones de Argentina o EEUU
+    def get_DB_iol(self, instrumento, mercado, panel, pais, desde, path, user_iol=None, pass_iol=None):
+        activos = []
+        simbolos = self.get_tickers_panel(instrumento="acciones", pais=pais, panel=panel, user_iol=user_iol, psw_iol=pass_iol)
         for i in simbolos:
-            if not str(i+".csv") in os.listdir(path):
+            if not str(i + ".csv") in os.listdir(path):
                 try:
                     print(i)
-                    df= self.get_hist_data_iol(mercado= mercado,simbolo= i, desde=desde, hasta= date.today(),  pais= pais, path=path, psw_iol=pass_iol, user_iol= user_iol)
-                    df.to_csv(path+i+".csv")
-
+                    df = self.get_hist_data_iol(
+                        mercado=mercado,
+                        simbolo=i,
+                        desde=desde,
+                        hasta=date.today(),
+                        pais=pais,
+                        path=path,
+                        psw_iol=pass_iol,
+                        user_iol=user_iol,
+                    )
+                    df.to_csv(path + i + ".csv")
+                except requests.HTTPError as e:
+                    print('error:', e)
                 except Exception as e:
                     print('error:', e)
-                except:
-                    pass
 
 class binance:
     """Wrapper simplificado del cliente de Binance.
@@ -131,29 +170,104 @@ class binance:
         except Exception as exc:  # pragma: no cover - solamente se ejecuta si falla la conexión
             self.client = None
             print(f"Unable to initialize Binance client: {exc}")
-        
-       
+        self.twm = None
+
+    def _call_with_retries(self, func, *args, retries=3, delay=1, **kwargs):
+        """Ejecuta una llamada a la API reintentando en caso de errores."""
+        for attempt in range(retries):
+            try:
+                return func(*args, **kwargs)
+            except BinanceAPIException:
+                if attempt == retries - 1:
+                    raise
+                time.sleep(delay)
+
     # Genera una lista de cryptomonedas diosponibles en Binance
 
     def get_crypto_tickers(self):
-        client= self.client
-        holc= pd.DataFrame(client.get_ticker())
-        Orderbook = pd.DataFrame(client.get_orderbook_tickers())
-        merged_inner = pd.merge(left=holc, right=Orderbook, left_on='symbol', right_on='symbol')
+        client = self.client
+        holc = pd.DataFrame(self._call_with_retries(client.get_ticker))
+        orderbook = pd.DataFrame(self._call_with_retries(client.get_orderbook_tickers))
+        merged_inner = pd.merge(left=holc, right=orderbook, left_on='symbol', right_on='symbol')
         return merged_inner
 
-    # Genera una tabla con datos historicos de una cryptomoneda, cada 5min
+    def get_order_book(self, symbol, limit=100):
+        """Obtiene el libro de órdenes para ``symbol``."""
+        data = self._call_with_retries(self.client.get_order_book, symbol=symbol, limit=limit)
+        bids = pd.DataFrame(data['bids'], columns=['price', 'quantity']).assign(side='bid')
+        asks = pd.DataFrame(data['asks'], columns=['price', 'quantity']).assign(side='ask')
+        return pd.concat([bids, asks], ignore_index=True)
 
-    def GetHistoricalData_crypto(self,sinceThisDate, par):
-        client= self.client
+    def get_recent_trades(self, symbol, limit=500):
+        """Obtiene las operaciones recientes para ``symbol``."""
+        trades = self._call_with_retries(self.client.get_recent_trades, symbol=symbol, limit=limit)
+        return pd.DataFrame(trades)
+
+    def start_ticker_socket(self, symbol, callback=None):
+        """Inicia un WebSocket para recibir datos en tiempo real."""
+        if self.twm is None:
+            self.twm = ThreadedWebsocketManager()
+            self.twm.start()
+
+        def _default(msg):
+            print(msg)
+
+        cb = callback or _default
+        self.twm.start_symbol_ticker_socket(cb, symbol)
+
+    def stop_socket(self):
+        if self.twm:
+            self.twm.stop()
+            self.twm = None
+
+    # Genera una tabla con datos historicos de una cryptomoneda
+
+    def GetHistoricalData_crypto(self, sinceThisDate, par, interval="5m"):
+        client = self.client
         untilThisDate = datetime.now()
-        candle = client.get_historical_klines(par, Client.KLINE_INTERVAL_5MINUTE, sinceThisDate, str(untilThisDate))
-        df = pd.DataFrame(candle, columns=['dateTime', 'open', 'max', 'min', 'close', 'volume', 'closeTime', 'quoteAssetVolume', 'numberOfTrades', 'takerBuyBaseVol', 'takerBuyQuoteVol', 'ignore'])
-        df['token']=(par)
-        df['asset']= "cryptocurrency"
+        interval_map = {
+            "1m": Client.KLINE_INTERVAL_1MINUTE,
+            "3m": Client.KLINE_INTERVAL_3MINUTE,
+            "5m": Client.KLINE_INTERVAL_5MINUTE,
+            "15m": Client.KLINE_INTERVAL_15MINUTE,
+            "30m": Client.KLINE_INTERVAL_30MINUTE,
+            "1h": Client.KLINE_INTERVAL_1HOUR,
+            "2h": Client.KLINE_INTERVAL_2HOUR,
+            "4h": Client.KLINE_INTERVAL_4HOUR,
+            "6h": Client.KLINE_INTERVAL_6HOUR,
+            "8h": Client.KLINE_INTERVAL_8HOUR,
+            "12h": Client.KLINE_INTERVAL_12HOUR,
+            "1d": Client.KLINE_INTERVAL_1DAY,
+            "3d": Client.KLINE_INTERVAL_3DAY,
+            "1w": Client.KLINE_INTERVAL_1WEEK,
+            "1M": Client.KLINE_INTERVAL_1MONTH,
+        }
+        kline_interval = interval_map.get(interval, Client.KLINE_INTERVAL_5MINUTE)
+        candle = self._call_with_retries(
+            client.get_historical_klines, par, kline_interval, sinceThisDate, str(untilThisDate)
+        )
+        df = pd.DataFrame(
+            candle,
+            columns=[
+                'dateTime',
+                'open',
+                'max',
+                'min',
+                'close',
+                'volume',
+                'closeTime',
+                'quoteAssetVolume',
+                'numberOfTrades',
+                'takerBuyBaseVol',
+                'takerBuyQuoteVol',
+                'ignore',
+            ],
+        )
+        df['token'] = par
+        df['asset'] = "cryptocurrency"
         df.dateTime = pd.to_datetime(df.dateTime, unit='ms')
         df.set_index('dateTime', inplace=True)
-        return(df)
+        return df
 
                     
     def get_db_crypto(self,path, since):
@@ -442,21 +556,20 @@ def act_db_csv(path_crypto, path_stocks, path_indexes, path_commodities, path_cu
                     df2.to_csv(path_macro + name + ".csv")
                     print(name + "ok")
             elif acciones == True:
+                df1=pd.read_csv(path_stocks+name+".csv")
+                df1=df1.set_index('dateTime')
                 try:
-                    df1=pd.read_csv(path_stocks+name+".csv")
                     curr=api_iol.get_hist_data_iol('bcBA', name, date, date.today(),'argentina', path_stocks, psw_iol=pass_iol, user_iol=user_iol)
-                    df1=df1.set_index('dateTime')
-                    df2=pd.concat([df1, curr], axis=0)
-                    print("saving")
-                    df2.to_csv(path_stocks+name+".csv")
-                    print(name+"ok")
-                except:
-                    df1=pd.read_csv(path_stocks+name+".csv")
-                    curr=api_iol.get_hist_data_iol('bcBA', name, date, date.today(),'estados_unidos', path_stocks, psw_iol=pass_iol, user_iol=user_iol)
-                    df1=df1.set_index('dateTime')
-                    df2=pd.concat([df1, curr], axis=0)
-                    print("saving")
-                    df2.to_csv(path_stocks+name+".csv")
-                    print(name+"ok")
+                except Exception:
+                    try:
+                        curr=api_iol.get_hist_data_iol('bcBA', name, date, date.today(),'estados_unidos', path_stocks, psw_iol=pass_iol, user_iol=user_iol)
+                    except Exception:
+                        curr=get_price_series(name, date, date.today())
+                mask = (curr.index > date)
+                curr=curr.loc[mask]
+                df2=pd.concat([df1, curr], axis=0)
+                print("saving")
+                save_series_to_csv(df2, path_stocks+name+".csv")
+                print(name+"ok")
     print(datetime.now())
             
