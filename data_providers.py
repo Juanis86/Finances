@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import Optional
 
 import pandas as pd
+import requests
 from pandas_datareader import data as pdr
 import yfinance as yf
 from alpha_vantage.timeseries import TimeSeries
@@ -85,6 +86,44 @@ def fetch_yahoo(
     return df
 
 
+def fetch_ecb_fx(
+    base: str,
+    symbols: list[str],
+    path: Path = path_currencies,
+) -> pd.DataFrame:
+    """Download latest FX rates from the ECB.
+
+    Rates are retrieved via the https://api.exchangerate.host/ endpoint. The
+    returned dataframe contains the columns ``date``, ``currency`` and
+    ``rate``. A CSV file named ``<base>.csv`` is stored in
+    :data:`settings.path_currencies`.
+
+    Parameters
+    ----------
+    base:
+        Base currency for the conversion, e.g. ``"EUR"``.
+    symbols:
+        List of target currency codes.
+    path:
+        Destination directory. Defaults to :data:`settings.path_currencies`.
+    """
+    url = "https://api.exchangerate.host/latest"
+    params = {"base": base, "symbols": ",".join(symbols)}
+    response = requests.get(url, params=params, timeout=30)
+    response.raise_for_status()
+    data = response.json()
+
+    date = data.get("date")
+    rates = data.get("rates", {})
+    df = pd.DataFrame(
+        [{"date": date, "currency": cur, "rate": rate} for cur, rate in rates.items()]
+    )
+
+    file_path = _ensure_path(path) / f"{base}.csv"
+    df.to_csv(file_path, index=False)
+    return df
+
+
 def fetch_alpha_vantage_fx(
     from_currency: str,
     to_currency: str,
@@ -144,6 +183,7 @@ def fetch_alpha_vantage_stock(
 __all__ = [
     "fetch_fred",
     "fetch_yahoo",
+    "fetch_ecb_fx",
     "fetch_alpha_vantage_fx",
     "fetch_alpha_vantage_stock",
 ]
