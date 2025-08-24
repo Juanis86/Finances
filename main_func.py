@@ -116,9 +116,21 @@ class iol():
                 except:
                     pass
 
-class binance():
+class binance:
+    """Wrapper simplificado del cliente de Binance.
+
+    Durante la inicialización se intenta crear una instancia de
+    :class:`binance.client.Client`. Si la conexión falla (por ejemplo por
+    falta de acceso a Internet), se captura la excepción para evitar que la
+    aplicación se detenga.
+    """
+
     def __init__(self):
-        self.client = Client()
+        try:
+            self.client = Client()
+        except Exception as exc:  # pragma: no cover - solamente se ejecuta si falla la conexión
+            self.client = None
+            print(f"Unable to initialize Binance client: {exc}")
         
        
     # Genera una lista de cryptomonedas diosponibles en Binance
@@ -271,17 +283,18 @@ def get_assets(type_,name_, cod, pathDB):
 # Función para actualizar la BD
 
 
-def act_db_csv(path_crypto,path_stocks, path_indexes, path_commodities, path_currencies, path_macro,  pass_iol, user_iol):
-    for path in (path_crypto,path_stocks, path_indexes, path_commodities, path_currencies, path_macro):
-        acciones=bool(re.search('acciones',path))
-        commodities=bool(re.search('commodities',path))
-        crypto=bool(re.search('crypto',path))
-        divisas=bool(re.search('divisas',path))
-        indices=bool(re.search('indices',path))
-        macro=bool(re.search('macro',path))
-        api_iol=iol(pass_iol,pass_iol )
-        api_binance= binance()
-        for file in os.listdir(path):
+def act_db_csv(path_crypto, path_stocks, path_indexes, path_commodities, path_currencies, path_macro, pass_iol, user_iol):
+    for path in (path_crypto, path_stocks, path_indexes, path_commodities, path_currencies, path_macro):
+        path_str = str(path)
+        acciones = bool(re.search("acciones", path_str))
+        commodities = bool(re.search("commodities", path_str))
+        crypto = bool(re.search("crypto", path_str))
+        divisas = bool(re.search("divisas", path_str))
+        indices = bool(re.search("indices", path_str))
+        macro = bool(re.search("macro", path_str))
+        api_iol = iol(pass_iol, pass_iol)
+        api_binance = binance()
+        for file in os.listdir(path_str):
             df=pd.read_csv(path+file)
             name =  file.split('.')[0]
             print(name)
@@ -395,6 +408,5 @@ def act_db_csv(path_crypto,path_stocks, path_indexes, path_commodities, path_cur
                     print("saving")
                     df2.to_csv(path_stocks+name+".csv")
                     print(name+"ok")
-    print(str(name)+' actualizado')
     print(datetime.now())
             
