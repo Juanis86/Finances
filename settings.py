@@ -24,6 +24,7 @@ PASS_IOL = os.getenv("PASS_IOL")
 URL_TOKEN = os.getenv("URL_TOKEN")
 GRANT_TYPE = os.getenv("GRANT_TYPE")
 URL_API = os.getenv("URL_API")
+THREADS = int(os.getenv("THREADS", "4"))
 
 
 # Elijo el formato a guardar (csv, sql o ambas)

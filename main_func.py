@@ -3,6 +3,7 @@ import requests
 import json
 import os
 from datetime import date
+import concurrent.futures
 import urllib.request
 from bs4 import BeautifulSoup
 import re
@@ -101,20 +102,33 @@ class iol():
 
     # Genera una base de datos con las acciones de Argentina o EEUU
 
-    def get_DB_iol(self, instrumento, mercado,panel, pais,   desde,  path, user_iol, pass_iol):
-        activos=[]
-        simbolos=  self.get_tickers_panel(instrumento="acciones", pais=pais, panel=panel,user_iol= user_iol, psw_iol= pass_iol)
-        for i in simbolos:
-            if not str(i+".csv") in os.listdir(path):
-                try:
-                    print(i)
-                    df= self.get_hist_data_iol(mercado= mercado,simbolo= i, desde=desde, hasta= date.today(),  pais= pais, path=path, psw_iol=pass_iol, user_iol= user_iol)
-                    df.to_csv(path+i+".csv")
+    def get_DB_iol(self, instrumento, mercado, panel, pais, desde, path, user_iol, pass_iol, threads=None):
+        activos = []
+        simbolos = self.get_tickers_panel(
+            instrumento="acciones", pais=pais, panel=panel, user_iol=user_iol, psw_iol=pass_iol
+        )
 
+        def _process_symbol(symbol: str) -> None:
+            csv_path = os.path.join(path, f"{symbol}.csv")
+            if not os.path.exists(csv_path):
+                try:
+                    print(symbol)
+                    df = self.get_hist_data_iol(
+                        mercado=mercado,
+                        simbolo=symbol,
+                        desde=desde,
+                        hasta=date.today(),
+                        pais=pais,
+                        path=path,
+                        psw_iol=pass_iol,
+                        user_iol=user_iol,
+                    )
+                    df.to_csv(csv_path)
                 except Exception as e:
                     print('error:', e)
-                except:
-                    pass
+
+        with concurrent.futures.ThreadPoolExecutor(max_workers=threads) as executor:
+            executor.map(_process_symbol, simbolos)
 
 class binance:
     """Wrapper simplificado del cliente de Binance.
