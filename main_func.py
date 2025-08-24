@@ -10,106 +10,124 @@ import pandas as pd
 import numpy as np
 from datetime import *
 from binance.client import Client
+from settings import URL_API, URL_TOKEN, GRANT_TYPE
 
 
 ############################################################################################################################
 ############################## FUNCTIONS ##################################################################################
 ###########################################################################################################################
 
-# Genera el token para los request de la API
-
 class iol():
     def __init__(self, user_iol, psw_iol):
-        self.user_iol= user_iol
+        self.user_iol = user_iol
         self.pass_iol = psw_iol
+        self.token = None
+        self.token_timestamp = None
+        self.expires_in = 0
 
-    def get_token(self, user_iol, psw_iol,):
-        headers = {'Content-Type': 'application/x-www-form-urlencoded'}
-        body = {'username':  self.user_iol,'password':  self.pass_iol,'grant_type': GRANT_TYPE,}
-        res = requests.post(URL_TOKEN, headers= {'Content-Type': 'application/x-www-form-urlencoded'}
-        , data=body)
-        tk= "Bearer "+res.json()['access_token']
-        return tk
-
-    def check_token(self, user_iol, psw_iol):
-        headers = {'Content-Type': 'application/x-www-form-urlencoded'}
-
+    def refresh_token(self):
         body = {
-            'username':  self.user_iol,
-            'password':  self.pass_iol,
+            'username': self.user_iol,
+            'password': self.pass_iol,
             'grant_type': GRANT_TYPE,
         }
-        res = requests.post(URL_TOKEN, headers= {'Content-Type': 'application/x-www-form-urlencoded',}
-        , data=body)
-        tk= "Barer "+res.json()['access_token']
-        return tk
+        res = requests.post(
+            URL_TOKEN,
+            headers={'Content-Type': 'application/x-www-form-urlencoded'},
+            data=body,
+        )
+        data = res.json()
+        self.token = "Bearer " + data.get('access_token', '')
+        self.expires_in = data.get('expires_in', 600)
+        self.token_timestamp = datetime.now()
+        return self.token
+
+    def get_token(self):
+        if self.token and self.token_timestamp:
+            delta = datetime.now() - self.token_timestamp
+            if delta < timedelta(seconds=self.expires_in - 60):
+                return self.token
+        return self.refresh_token()
+
+    def check_token(self):
+        return self.get_token()
 
     # Genera una lista con los simbolos de las acciones pertenecientes a un panel
 
-    def get_tickers_panel( self, instrumento, panel, pais, user_iol, psw_iol):
-
-        auth= self.get_token(user_iol, psw_iol)
-
-        simbolos=[]
-        response = requests.get(f'{URL_API}/Cotizaciones/{instrumento}/{panel}/{pais}', headers= {'Content-Type': 'application/x-www-form-urlencoded', 'authorization': auth}
+    def get_tickers_panel(self, instrumento, panel, pais):
+        auth = self.get_token()
+        simbolos = []
+        response = requests.get(
+            f'{URL_API}/Cotizaciones/{instrumento}/{panel}/{pais}',
+            headers={'Content-Type': 'application/x-www-form-urlencoded', 'authorization': auth},
         )
-        dict= json.loads(response.text)
+        dict = json.loads(response.text)
         for i in dict["titulos"]:
             simbolos.append(i["simbolo"])
         return simbolos
 
     # Genera una tabla con los simbolod de un mercado particular
 
-    def get_asset_iol(self, mercado, simbolo, user_iol):
+    def get_asset_iol(self, mercado, simbolo):
+        auth = self.get_token()
         response = requests.get(
-            f'{self.user_iol}/{mercado}/Titulos/{simbolo}', headers= {'Content-Type': 'application/x-www-form-urlencoded'}
+            f'{URL_API}/{mercado}/Titulos/{simbolo}',
+            headers={'Content-Type': 'application/x-www-form-urlencoded', 'authorization': auth},
         )
         return json.loads(response.text)
 
-    def get_panel(self, instrumento, panel, pais, psw_iol, user_iol):
-        auth= self.check_token(user_iol, psw_iol)
-
+    def get_panel(self, instrumento, panel, pais):
+        auth = self.get_token()
         response = requests.get(
-            f'{URL_API}/Cotizaciones/{instrumento}/{panel}/{pais}', headers= {'Content-Type': 'application/x-www-form-urlencoded', 'authorization': auth}
+            f'{URL_API}/Cotizaciones/{instrumento}/{panel}/{pais}',
+            headers={'Content-Type': 'application/x-www-form-urlencoded', 'authorization': auth},
         )
-        res= json.loads(response.text)
+        res = json.loads(response.text)
         pd.DataFrame(res)
 
     # Genera una tabla con los datos historicos de una acción:
 
-    def get_hist_data_iol(self, mercado, simbolo, desde, hasta,pais, path, psw_iol, user_iol):
-        auth= self.get_token(user_iol, psw_iol)
-        asset= "stock"
+    def get_hist_data_iol(self, mercado, simbolo, desde, hasta, pais, path):
+        auth = self.get_token()
+        asset = "stock"
         response = requests.get(
-            f'{URL_API}/{mercado}/Titulos/{simbolo}/Cotizacion/seriehistorica/{desde}/{hasta}/sinajustar', headers= {'Content-Type': 'application/x-www-form-urlencoded', 'authorization': auth}
+            f'{URL_API}/{mercado}/Titulos/{simbolo}/Cotizacion/seriehistorica/{desde}/{hasta}/sinajustar',
+            headers={'Content-Type': 'application/x-www-form-urlencoded', 'authorization': auth},
         )
-        res= response.json()
-        asset= "stocks"
+        res = response.json()
+        asset = "stocks"
         df = pd.DataFrame(res)
-        df= df.iloc[:,:12]
-        df.columns= ["close", "var", "open", "max", "min", "dateTime","trend","opA" ,"pClose", "tradeQ", "volume", "meanp"]
-        df= df.drop(columns=['trend', 'tradeQ','opA', 'pClose', 'meanp'], axis=1)
-        df['dateTime']=df['dateTime'].str.slice(0, 10)
+        df = df.iloc[:, :12]
+        df.columns = ["close", "var", "open", "max", "min", "dateTime", "trend", "opA", "pClose", "tradeQ", "volume", "meanp"]
+        df = df.drop(columns=['trend', 'tradeQ', 'opA', 'pClose', 'meanp'], axis=1)
+        df['dateTime'] = df['dateTime'].str.slice(0, 10)
         df["dateTime"] = pd.to_datetime(df.dateTime)
-        df=df[["close", "var", "open", "max", "min", "dateTime", "volume"]]
-        df['ticker']= (simbolo)
-        df["country"]= (pais)
-        df["asset"]= asset
+        df = df[["close", "var", "open", "max", "min", "dateTime", "volume"]]
+        df['ticker'] = (simbolo)
+        df["country"] = (pais)
+        df["asset"] = asset
         df.set_index('dateTime', inplace=True)
-    
+
         return df
 
     # Genera una base de datos con las acciones de Argentina o EEUU
 
-    def get_DB_iol(self, instrumento, mercado,panel, pais,   desde,  path, user_iol, pass_iol):
-        activos=[]
-        simbolos=  self.get_tickers_panel(instrumento="acciones", pais=pais, panel=panel,user_iol= user_iol, psw_iol= pass_iol)
+    def get_DB_iol(self, instrumento, mercado, panel, pais, desde, path):
+        activos = []
+        simbolos = self.get_tickers_panel(instrumento="acciones", pais=pais, panel=panel)
         for i in simbolos:
-            if not str(i+".csv") in os.listdir(path):
+            if not str(i + ".csv") in os.listdir(path):
                 try:
                     print(i)
-                    df= self.get_hist_data_iol(mercado= mercado,simbolo= i, desde=desde, hasta= date.today(),  pais= pais, path=path, psw_iol=pass_iol, user_iol= user_iol)
-                    df.to_csv(path+i+".csv")
+                    df = self.get_hist_data_iol(
+                        mercado=mercado,
+                        simbolo=i,
+                        desde=desde,
+                        hasta=date.today(),
+                        pais=pais,
+                        path=path,
+                    )
+                    df.to_csv(path + i + ".csv")
 
                 except Exception as e:
                     print('error:', e)
@@ -292,7 +310,7 @@ def act_db_csv(path_crypto, path_stocks, path_indexes, path_commodities, path_cu
         divisas = bool(re.search("divisas", path_str))
         indices = bool(re.search("indices", path_str))
         macro = bool(re.search("macro", path_str))
-        api_iol = iol(pass_iol, pass_iol)
+        api_iol = iol(user_iol, pass_iol)
         api_binance = binance()
         for file in os.listdir(path_str):
             df=pd.read_csv(path+file)
@@ -394,7 +412,7 @@ def act_db_csv(path_crypto, path_stocks, path_indexes, path_commodities, path_cu
             elif acciones == True:
                 try:
                     df1=pd.read_csv(path_stocks+name+".csv")
-                    curr=api_iol.get_hist_data_iol('bcBA', name, date, date.today(),'argentina', path_stocks, psw_iol=pass_iol, user_iol=user_iol)
+                    curr=api_iol.get_hist_data_iol('bcBA', name, date, date.today(),'argentina', path_stocks)
                     df1=df1.set_index('dateTime')
                     df2=pd.concat([df1, curr], axis=0)
                     print("saving")
@@ -402,7 +420,7 @@ def act_db_csv(path_crypto, path_stocks, path_indexes, path_commodities, path_cu
                     print(name+"ok")
                 except:
                     df1=pd.read_csv(path_stocks+name+".csv")
-                    curr=api_iol.get_hist_data_iol('bcBA', name, date, date.today(),'estados_unidos', path_stocks, psw_iol=pass_iol, user_iol=user_iol)
+                    curr=api_iol.get_hist_data_iol('bcBA', name, date, date.today(),'estados_unidos', path_stocks)
                     df1=df1.set_index('dateTime')
                     df2=pd.concat([df1, curr], axis=0)
                     print("saving")
