@@ -10,6 +10,7 @@ import pandas as pd
 import numpy as np
 from datetime import *
 from binance.client import Client
+from fred_client import get_series
 
 
 ############################################################################################################################
@@ -295,10 +296,11 @@ def act_db_csv(path_crypto, path_stocks, path_indexes, path_commodities, path_cu
         api_iol = iol(pass_iol, pass_iol)
         api_binance = binance()
         for file in os.listdir(path_str):
-            df=pd.read_csv(path+file)
-            name =  file.split('.')[0]
+            file_path = os.path.join(path_str, file)
+            df = pd.read_csv(file_path, index_col=0, parse_dates=True)
+            name = file.split('.')[0]
             print(name)
-            date= max(pd.to_datetime(df.index()))
+            date = df.index.max()
             if crypto == True:
                 df1=pd.read_csv(path_crypto+name+".csv")
                 curr=api_binance.GetHistoricalData_crypto(str(date), name)
@@ -370,27 +372,13 @@ def act_db_csv(path_crypto, path_stocks, path_indexes, path_commodities, path_cu
                     print("saving")
                     df2.to_csv(path_currencies+name+".csv")
                     print(name+"ok")
-            elif macro==True:
-                try:
-                    df1=pd.read_csv(path_macro+name+".csv")
-                    curr= get_assets("commodities", name,1,path_macro)
-                    mask = (curr['dateTime'] > date)
-                    curr=curr.loc[mask]
-                    df1=df1.set_index('dateTime')
-                    df2=pd.concat([df1, curr], axis=0)
-                    print("saving")
-                    df2.to_csv(path_macro+name+".csv")
-                    print(name+"ok")
-                except:
-                    df1=pd.read_csv(path_macro+name+".csv")
-                    curr= get_assets("commodities", name,0,path_macro)
-                    mask = (curr['dateTime'] > date)
-                    curr=curr.loc[mask]
-                    df1=df1.set_index('dateTime')
-                    df2=pd.concat([df1, curr], axis=0)
-                    print("saving")
-                    df2.to_csv(path_macro+name+".csv")
-                    print(name+"ok")
+            elif macro == True:
+                curr = get_series(name, date.strftime('%Y-%m-%d'))
+                curr = curr[curr.index > date]
+                df2 = pd.concat([df, curr])
+                print('saving')
+                df2.to_csv(file_path)
+                print(name + ' ok')
             elif acciones == True:
                 try:
                     df1=pd.read_csv(path_stocks+name+".csv")

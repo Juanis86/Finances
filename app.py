@@ -1,17 +1,14 @@
 from settings import *
 from main_func import *
+from fred_client import get_series
 
 #Cargo las variables de entorno
-
-
-
 
 if __name__== '__main__':
     start= datetime.now()
     create_DB= False
     IOL_Api= iol(USER_IOL, PASS_IOL)
     Binance_Api= binance()
-
 
     if create_DB== True:
             Binance_Api.get_db_crypto(path_crypto, "2018-01-01 00:00:00")# Genero la BD desde 2018 con timeframe de 5´
@@ -32,10 +29,10 @@ if __name__== '__main__':
             merval= get_assets("indices","merv",0,path_indexes)
             usd_ars= get_assets("currencies","usd-ars",0,path_currencies)
             usd_bz= get_assets("currencies","usd-brl",1,path_currencies)
-          #  usd_10y= get_assets("rates-bonds","u.s.-10-year-bond-yield",0,path_macro)
+            for series_id in ["DGS10"]:
+                series = get_series(series_id, "2010-01-01")
+                series.to_csv(path_macro / f"{series_id}.csv")
             print(start)
             print(datetime.now)
     else:
-      act_db_csv(path_crypto,path_stocks, path_indexes, path_commodities, path_currencies, path_macro, pass_iol= PASS_IOL,user_iol= USER_IOL)
-
-
+      act_db_csv(str(path_crypto),str(path_stocks), str(path_indexes), str(path_commodities), str(path_currencies), str(path_macro), pass_iol= PASS_IOL,user_iol= USER_IOL)
