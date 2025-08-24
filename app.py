@@ -1,5 +1,6 @@
 from settings import *
 from main_func import *
+from coingecko_client import fetch_coins_markets
 
 #Cargo las variables de entorno
 
@@ -15,6 +16,7 @@ if __name__== '__main__':
 
     if create_DB== True:
             Binance_Api.get_db_crypto(path_crypto, "2018-01-01 00:00:00")# Genero la BD desde 2018 con timeframe de 5´
+            fetch_coins_markets("usd", 250)
             IOL_Api.get_DB_iol("acciones", "bcBA", "panel general", "argentina", "2010-01-01",path_stocks, USER_IOL, PASS_IOL)
             IOL_Api.get_DB_iol("acciones", "nySE", "sp500", "estados_unidos", "2010-01-01",path_stocks, USER_IOL, PASS_IOL)
             Witi_oil= get_assets("commodities", "crude-oil",1,path_commodities)
@@ -37,5 +39,6 @@ if __name__== '__main__':
             print(datetime.now)
     else:
       act_db_csv(path_crypto,path_stocks, path_indexes, path_commodities, path_currencies, path_macro, pass_iol= PASS_IOL,user_iol= USER_IOL)
+      fetch_coins_markets("usd", 250)
 
 
