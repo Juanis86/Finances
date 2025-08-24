@@ -10,6 +10,9 @@ import pandas as pd
 import numpy as np
 from datetime import *
 from binance.client import Client
+from binance.exceptions import BinanceAPIException
+from binance.streams import ThreadedWebsocketManager
+import time
 
 
 ############################################################################################################################
@@ -131,29 +134,104 @@ class binance:
         except Exception as exc:  # pragma: no cover - solamente se ejecuta si falla la conexión
             self.client = None
             print(f"Unable to initialize Binance client: {exc}")
-        
-       
+        self.twm = None
+
+    def _call_with_retries(self, func, *args, retries=3, delay=1, **kwargs):
+        """Ejecuta una llamada a la API reintentando en caso de errores."""
+        for attempt in range(retries):
+            try:
+                return func(*args, **kwargs)
+            except BinanceAPIException:
+                if attempt == retries - 1:
+                    raise
+                time.sleep(delay)
+
     # Genera una lista de cryptomonedas diosponibles en Binance
 
     def get_crypto_tickers(self):
-        client= self.client
-        holc= pd.DataFrame(client.get_ticker())
-        Orderbook = pd.DataFrame(client.get_orderbook_tickers())
-        merged_inner = pd.merge(left=holc, right=Orderbook, left_on='symbol', right_on='symbol')
+        client = self.client
+        holc = pd.DataFrame(self._call_with_retries(client.get_ticker))
+        orderbook = pd.DataFrame(self._call_with_retries(client.get_orderbook_tickers))
+        merged_inner = pd.merge(left=holc, right=orderbook, left_on='symbol', right_on='symbol')
         return merged_inner
 
-    # Genera una tabla con datos historicos de una cryptomoneda, cada 5min
+    def get_order_book(self, symbol, limit=100):
+        """Obtiene el libro de órdenes para ``symbol``."""
+        data = self._call_with_retries(self.client.get_order_book, symbol=symbol, limit=limit)
+        bids = pd.DataFrame(data['bids'], columns=['price', 'quantity']).assign(side='bid')
+        asks = pd.DataFrame(data['asks'], columns=['price', 'quantity']).assign(side='ask')
+        return pd.concat([bids, asks], ignore_index=True)
 
-    def GetHistoricalData_crypto(self,sinceThisDate, par):
-        client= self.client
+    def get_recent_trades(self, symbol, limit=500):
+        """Obtiene las operaciones recientes para ``symbol``."""
+        trades = self._call_with_retries(self.client.get_recent_trades, symbol=symbol, limit=limit)
+        return pd.DataFrame(trades)
+
+    def start_ticker_socket(self, symbol, callback=None):
+        """Inicia un WebSocket para recibir datos en tiempo real."""
+        if self.twm is None:
+            self.twm = ThreadedWebsocketManager()
+            self.twm.start()
+
+        def _default(msg):
+            print(msg)
+
+        cb = callback or _default
+        self.twm.start_symbol_ticker_socket(cb, symbol)
+
+    def stop_socket(self):
+        if self.twm:
+            self.twm.stop()
+            self.twm = None
+
+    # Genera una tabla con datos historicos de una cryptomoneda
+
+    def GetHistoricalData_crypto(self, sinceThisDate, par, interval="5m"):
+        client = self.client
         untilThisDate = datetime.now()
-        candle = client.get_historical_klines(par, Client.KLINE_INTERVAL_5MINUTE, sinceThisDate, str(untilThisDate))
-        df = pd.DataFrame(candle, columns=['dateTime', 'open', 'max', 'min', 'close', 'volume', 'closeTime', 'quoteAssetVolume', 'numberOfTrades', 'takerBuyBaseVol', 'takerBuyQuoteVol', 'ignore'])
-        df['token']=(par)
-        df['asset']= "cryptocurrency"
+        interval_map = {
+            "1m": Client.KLINE_INTERVAL_1MINUTE,
+            "3m": Client.KLINE_INTERVAL_3MINUTE,
+            "5m": Client.KLINE_INTERVAL_5MINUTE,
+            "15m": Client.KLINE_INTERVAL_15MINUTE,
+            "30m": Client.KLINE_INTERVAL_30MINUTE,
+            "1h": Client.KLINE_INTERVAL_1HOUR,
+            "2h": Client.KLINE_INTERVAL_2HOUR,
+            "4h": Client.KLINE_INTERVAL_4HOUR,
+            "6h": Client.KLINE_INTERVAL_6HOUR,
+            "8h": Client.KLINE_INTERVAL_8HOUR,
+            "12h": Client.KLINE_INTERVAL_12HOUR,
+            "1d": Client.KLINE_INTERVAL_1DAY,
+            "3d": Client.KLINE_INTERVAL_3DAY,
+            "1w": Client.KLINE_INTERVAL_1WEEK,
+            "1M": Client.KLINE_INTERVAL_1MONTH,
+        }
+        kline_interval = interval_map.get(interval, Client.KLINE_INTERVAL_5MINUTE)
+        candle = self._call_with_retries(
+            client.get_historical_klines, par, kline_interval, sinceThisDate, str(untilThisDate)
+        )
+        df = pd.DataFrame(
+            candle,
+            columns=[
+                'dateTime',
+                'open',
+                'max',
+                'min',
+                'close',
+                'volume',
+                'closeTime',
+                'quoteAssetVolume',
+                'numberOfTrades',
+                'takerBuyBaseVol',
+                'takerBuyQuoteVol',
+                'ignore',
+            ],
+        )
+        df['token'] = par
+        df['asset'] = "cryptocurrency"
         df.dateTime = pd.to_datetime(df.dateTime, unit='ms')
         df.set_index('dateTime', inplace=True)
-        return(df)
+        return df
 
                     
     def get_db_crypto(self,path, since):
