@@ -28,6 +28,7 @@ URL_API = os.getenv("URL_API")
 # API keys for external data providers
 FRED_API_KEY = os.getenv("FRED_API_KEY")
 ALPHA_VANTAGE_API_KEY = os.getenv("ALPHA_VANTAGE_API_KEY")
+COINMARKETCAP_API_KEY = os.getenv("COINMARKETCAP_API_KEY")
 
 
 # Elijo el formato a guardar (csv, sql o ambas)
