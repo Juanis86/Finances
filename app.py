@@ -1,5 +1,6 @@
 from settings import *
 from main_func import *
+from global_stocks import get_price_series, save_series_to_csv
 
 #Cargo las variables de entorno
 
@@ -33,6 +34,10 @@ if __name__== '__main__':
             usd_ars= get_assets("currencies","usd-ars",0,path_currencies)
             usd_bz= get_assets("currencies","usd-brl",1,path_currencies)
           #  usd_10y= get_assets("rates-bonds","u.s.-10-year-bond-yield",0,path_macro)
+            global_symbols = ["AAPL", "MSFT"]
+            for sym in global_symbols:
+                series = get_price_series(sym, "2010-01-01", datetime.now().strftime("%Y-%m-%d"))
+                save_series_to_csv(series, path_stocks / f"{sym}.csv")
             print(start)
             print(datetime.now)
     else:
