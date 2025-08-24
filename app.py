@@ -40,7 +40,28 @@ if __name__== '__main__':
                 save_series_to_csv(series, path_stocks / f"{sym}.csv")
             print(start)
             print(datetime.now)
+
     else:
-      act_db_csv(path_crypto,path_stocks, path_indexes, path_commodities, path_currencies, path_macro, pass_iol= PASS_IOL,user_iol= USER_IOL)
+        # Actualización de las demás bases de datos
+        tmp_macro = path_macro / "_tmp_ignore"
+        os.makedirs(tmp_macro, exist_ok=True)
+        act_db_csv(path_crypto, path_stocks, path_indexes, path_commodities, path_currencies, tmp_macro,
+                   pass_iol=PASS_IOL, user_iol=USER_IOL)
 
+        # Actualización de series macro
+        for serie in MACRO_SERIES:
+            file_path = path_macro / f"{serie['id']}.csv"
+            if file_path.exists():
+                df_existing = pd.read_csv(file_path, parse_dates=['date'])
+                last_date = df_existing['date'].max()
+                if serie['source'] == 'fred':
+                    start_date = (last_date + pd.Timedelta(days=1)).strftime('%Y-%m-%d')
+                    end_date = date.today().strftime('%Y-%m-%d')
+                else:
+                    start_date = str(last_date.year + 1)
+                    end_date = str(date.today().year)
+            else:
+                start_date = serie['start']
+                end_date = date.today().strftime('%Y-%m-%d') if serie['source'] == 'fred' else str(date.today().year)
 
+            fetch_series(serie['id'], start_date, end_date, serie['source'])
