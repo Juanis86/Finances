@@ -344,56 +344,106 @@ def get_total_stocks():
     Sector=samp[2]+nasdaq[2]+d_jones[2]
     return pd.DataFrame(zip(Syms, Names, Sector), columns=["Syms", "Name", "Sector"])
 
+# Inicializa la lista de acciones para evitar depender de una variable externa "lis".
+try:
+    lis = get_total_stocks()
+except Exception:
+    # En caso de que falle el request a Wikipedia se crea un DataFrame vacío
+    lis = pd.DataFrame(columns=["Syms", "Name", "Sector"])
+
 # Scrapper de investing que devuelve una tabla con los ultimos datos de los activos pedidos
 
-def get_assets(type_,name_, cod, pathDB):
+def get_assets(type_, name_, pathDB, rows=1, page=1):
+    """Descarga datos históricos de *Investing*.
+
+    Se agregaron validaciones HTML para manejar cambios en la estructura de la
+    página y se permite paginar y obtener múltiples filas por petición.
+
+    Parameters
+    ----------
+    type_ : str
+        Tipo de activo (ej. "commodities", "indices").
+    name_ : str
+        Nombre del activo utilizado en la URL de Investing.
+    pathDB : str
+        Ruta donde se almacenará el CSV resultante.
+    rows : int, optional
+        Cantidad de filas a descargar por petición. Por defecto 1.
+    page : int, optional
+        Página a solicitar en Investing. Por defecto 1.
+    """
+
     print(name_)
-    if type_=="currencies" or type_=="rates-bonds":
-        columns=["dateTime", "Price", "Open","High", "Low", "Var"]
+
+    # Determina las columnas en función del tipo de activo
+    if type_ == "currencies" or type_ == "rates-bonds":
+        columns = ["dateTime", "Price", "Open", "High", "Low", "Var"]
     else:
-        columns=["dateTime", "Close", "Open","Max", "Min", "Vol", "Var"]
-    if type_=="equities":
-        namepath=(lis.loc[lis["Syms"]==name_, "Name"]).unique()[1]
-        namepath=name_.lower()
+        columns = ["dateTime", "Close", "Open", "Max", "Min", "Vol", "Var"]
+
+    # Para acciones se intenta mapear el símbolo al nombre utilizando la lista
+    if type_ == "equities":
+        try:
+            namepath = (
+                lis.loc[lis["Syms"] == name_, "Name"].iloc[0]
+            ).lower()
+        except Exception:
+            namepath = name_.lower()
     else:
-        namepath=name_
-    path= "https://es.investing.com/"+type_+"/"+ name_+"-historical-data"
-    headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'}
-    req = urllib.request.Request(path, headers=headers)
+        namepath = name_
+
+    url = f"https://es.investing.com/{type_}/{namepath}-historical-data"
+    if page > 1:
+        url = f"{url}?p={page}"
+
+    headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
+    req = urllib.request.Request(url, headers=headers)
     with urllib.request.urlopen(req) as response:
         raw = response.read()
+
     soup = BeautifulSoup(raw, "lxml")
-    table=[]
-    df=[]
-    row_=soup.find_all({"tbody":"tr"})[cod]
-    row_=row_.contents
-    for i in row_:
-        row=[]
-        for n in i:
-            value=str(re.findall('>.*<',str(n)))
-            value=value.replace("<",'')
-            value=value.replace(">",'')
-            value=value.replace("K","000")
-            value=value.replace(",",".")
-            value=value.replace('[', '')
-            value=value.replace(']', '')
-            value=value.replace("'","")
-            if value!='[]' and value!="":
-                try:
-                    row.append(float(value))
-                except:
-                    row.append(value)
-        if len(row)>0:
-            table.append(row)
-    for j in table:
-        if j !=[""]:
-            df.append(j)
-    df= pd.DataFrame(df)
-    df['asset']=str(type_)
-    df['dateTime']= df.iloc[:,0].apply(lambda x: (x.split('"')[1]).replace('.','/'))
-    df.dateTime = pd.to_datetime(df.dateTime, format='%d/%m/%Y')
-    df.set_index('dateTime', inplace=True)
-    df.to_csv(pathDB+(name_)+".csv")
+
+    # Validación de la estructura HTML
+    table_html = soup.find("table")
+    if table_html is None:
+        raise ValueError("No se encontró la tabla de datos en la página")
+
+    tbody = table_html.find("tbody")
+    if tbody is None:
+        raise ValueError("La tabla no contiene un <tbody> con datos")
+
+    rows_html = tbody.find_all("tr")
+    if not rows_html:
+        raise ValueError("No se encontraron filas dentro de la tabla")
+
+    # Procesa las filas solicitadas
+    data = []
+    for tr in rows_html[:rows]:
+        values = []
+        for td in tr.find_all("td"):
+            value = td.get_text(strip=True)
+            value = (
+                value.replace("K", "000")
+                .replace("M", "000000")
+                .replace(",", ".")
+            )
+            values.append(value)
+        if values:
+            data.append(values)
+
+    df = pd.DataFrame(data, columns=columns[: len(data[0])])
+    df["asset"] = str(type_)
+
+    # Normaliza fechas y establece el índice
+    df["dateTime"] = pd.to_datetime(
+        df["dateTime"].str.replace(".", "/"), dayfirst=True, errors="coerce"
+    )
+    df.set_index("dateTime", inplace=True)
+
+    if pathDB is not None:
+        df.to_csv(os.path.join(pathDB, f"{name_}.csv"))
+
+    return df
 # Función para actualizar la BD
 
 
@@ -423,88 +473,88 @@ def act_db_csv(path_crypto, path_stocks, path_indexes, path_commodities, path_cu
                 print(name+"ok")
             elif commodities == True:
                 try:
-                    df1=pd.read_csv(path_commodities+name+".csv")
-                    curr= get_assets("commodities", name,1,path_commodities)
+                    df1 = pd.read_csv(path_commodities + name + ".csv")
+                    curr = get_assets("commodities", name, path_commodities, rows=50)
                     mask = (curr['dateTime'] > date)
-                    curr=curr.loc[mask]
-                    df1=df1.set_index('dateTime')
-                    df2=pd.concat([df1, curr], axis=0)
+                    curr = curr.loc[mask]
+                    df1 = df1.set_index('dateTime')
+                    df2 = pd.concat([df1, curr], axis=0)
                     print("saving")
-                    df2.to_csv(path_commodities+name+".csv")
-                    print(name+"ok")
-                except:
-                    df1=pd.read_csv(path_commodities+name+".csv")
-                    curr= get_assets("commodities", name,0,path_commodities)
+                    df2.to_csv(path_commodities + name + ".csv")
+                    print(name + "ok")
+                except Exception:
+                    df1 = pd.read_csv(path_commodities + name + ".csv")
+                    curr = get_assets("commodities", name, path_commodities, rows=50)
                     mask = (curr['dateTime'] > date)
-                    curr=curr.loc[mask]
-                    df1=df1.set_index('dateTime')
-                    df2=pd.concat([df1, curr], axis=0)
+                    curr = curr.loc[mask]
+                    df1 = df1.set_index('dateTime')
+                    df2 = pd.concat([df1, curr], axis=0)
                     print("saving")
-                    df2.to_csv(path_commodities+name+".csv")
-                    print(name+"ok")
+                    df2.to_csv(path_commodities + name + ".csv")
+                    print(name + "ok")
             elif indices == True:
                 try:
-                    df1=pd.read_csv(path_indexes+name+".csv")
-                    curr= get_assets("commodities", name,1,path_indexes)
+                    df1 = pd.read_csv(path_indexes + name + ".csv")
+                    curr = get_assets("indices", name, path_indexes, rows=50)
                     mask = (curr['dateTime'] > date)
-                    curr=curr.loc[mask]
-                    df1=df1.set_index('dateTime')
-                    df2=pd.concat([df1, curr], axis=0)
+                    curr = curr.loc[mask]
+                    df1 = df1.set_index('dateTime')
+                    df2 = pd.concat([df1, curr], axis=0)
                     print("saving")
-                    df2.to_csv(path_indexes+name+".csv")
-                    print(name+"ok")
-                except:
-                    df1=pd.read_csv(path_indexes+name+".csv")
-                    curr= get_assets("commodities", name,0,path_indexes)
+                    df2.to_csv(path_indexes + name + ".csv")
+                    print(name + "ok")
+                except Exception:
+                    df1 = pd.read_csv(path_indexes + name + ".csv")
+                    curr = get_assets("indices", name, path_indexes, rows=50)
                     mask = (curr['dateTime'] > date)
-                    curr=curr.loc[mask]
-                    df1=df1.set_index('dateTime')
-                    df2=pd.concat([df1, curr], axis=0)
+                    curr = curr.loc[mask]
+                    df1 = df1.set_index('dateTime')
+                    df2 = pd.concat([df1, curr], axis=0)
                     print("saving")
-                    df2.to_csv(path_indexes+name+".csv")
-                    print(name+"ok")
+                    df2.to_csv(path_indexes + name + ".csv")
+                    print(name + "ok")
             elif divisas == True:
                 try:
-                    df1=pd.read_csv(path_currencies+name+".csv")
-                    curr= get_assets("commodities", name,1,path_currencies)
+                    df1 = pd.read_csv(path_currencies + name + ".csv")
+                    curr = get_assets("currencies", name, path_currencies, rows=50)
                     mask = (curr['dateTime'] > date)
-                    curr=curr.loc[mask]
-                    df1=df1.set_index('dateTime')
-                    df2=pd.concat([df1, curr], axis=0)
+                    curr = curr.loc[mask]
+                    df1 = df1.set_index('dateTime')
+                    df2 = pd.concat([df1, curr], axis=0)
                     print("saving")
-                    df2.to_csv(path_currencies+name+".csv")
-                    print(name+"ok")
-                except:
-                    df1=pd.read_csv(path_currencies+name+".csv")
-                    curr= get_assets("commodities", name,0,path_currencies)
+                    df2.to_csv(path_currencies + name + ".csv")
+                    print(name + "ok")
+                except Exception:
+                    df1 = pd.read_csv(path_currencies + name + ".csv")
+                    curr = get_assets("currencies", name, path_currencies, rows=50)
                     mask = (curr['dateTime'] > date)
-                    curr=curr.loc[mask]
-                    df1=df1.set_index('dateTime')
-                    df2=pd.concat([df1, curr], axis=0)
+                    curr = curr.loc[mask]
+                    df1 = df1.set_index('dateTime')
+                    df2 = pd.concat([df1, curr], axis=0)
                     print("saving")
-                    df2.to_csv(path_currencies+name+".csv")
-                    print(name+"ok")
-            elif macro==True:
+                    df2.to_csv(path_currencies + name + ".csv")
+                    print(name + "ok")
+            elif macro == True:
                 try:
-                    df1=pd.read_csv(path_macro+name+".csv")
-                    curr= get_assets("commodities", name,1,path_macro)
+                    df1 = pd.read_csv(path_macro + name + ".csv")
+                    curr = get_assets("rates-bonds", name, path_macro, rows=50)
                     mask = (curr['dateTime'] > date)
-                    curr=curr.loc[mask]
-                    df1=df1.set_index('dateTime')
-                    df2=pd.concat([df1, curr], axis=0)
+                    curr = curr.loc[mask]
+                    df1 = df1.set_index('dateTime')
+                    df2 = pd.concat([df1, curr], axis=0)
                     print("saving")
-                    df2.to_csv(path_macro+name+".csv")
-                    print(name+"ok")
-                except:
-                    df1=pd.read_csv(path_macro+name+".csv")
-                    curr= get_assets("commodities", name,0,path_macro)
+                    df2.to_csv(path_macro + name + ".csv")
+                    print(name + "ok")
+                except Exception:
+                    df1 = pd.read_csv(path_macro + name + ".csv")
+                    curr = get_assets("rates-bonds", name, path_macro, rows=50)
                     mask = (curr['dateTime'] > date)
-                    curr=curr.loc[mask]
-                    df1=df1.set_index('dateTime')
-                    df2=pd.concat([df1, curr], axis=0)
+                    curr = curr.loc[mask]
+                    df1 = df1.set_index('dateTime')
+                    df2 = pd.concat([df1, curr], axis=0)
                     print("saving")
-                    df2.to_csv(path_macro+name+".csv")
-                    print(name+"ok")
+                    df2.to_csv(path_macro + name + ".csv")
+                    print(name + "ok")
             elif acciones == True:
                 df1=pd.read_csv(path_stocks+name+".csv")
                 df1=df1.set_index('dateTime')
