@@ -25,6 +25,10 @@ URL_TOKEN = os.getenv("URL_TOKEN")
 GRANT_TYPE = os.getenv("GRANT_TYPE")
 URL_API = os.getenv("URL_API")
 
+# API keys for external data providers
+FRED_API_KEY = os.getenv("FRED_API_KEY")
+ALPHA_VANTAGE_API_KEY = os.getenv("ALPHA_VANTAGE_API_KEY")
+
 
 # Elijo el formato a guardar (csv, sql o ambas)
 save_sql = True
