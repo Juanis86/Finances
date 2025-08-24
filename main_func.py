@@ -77,43 +77,159 @@ class iol():
 
     # Genera una tabla con los datos historicos de una acción:
 
-    def get_hist_data_iol(self, mercado, simbolo, desde, hasta,pais, path, psw_iol, user_iol):
-        auth= self.get_token(user_iol, psw_iol)
-        asset= "stock"
+    def get_hist_data_iol(self, mercado, simbolo, desde, hasta, pais, path, psw_iol, user_iol):
+        auth = self.get_token(user_iol, psw_iol)
         response = requests.get(
-            f'{URL_API}/{mercado}/Titulos/{simbolo}/Cotizacion/seriehistorica/{desde}/{hasta}/sinajustar', headers= {'Content-Type': 'application/x-www-form-urlencoded', 'authorization': auth}
+            f'{URL_API}/{mercado}/Titulos/{simbolo}/Cotizacion/seriehistorica/{desde}/{hasta}/sinajustar',
+            headers={'Content-Type': 'application/x-www-form-urlencoded', 'authorization': auth},
         )
-        res= response.json()
-        asset= "stocks"
+        res = response.json()
         df = pd.DataFrame(res)
-        df= df.iloc[:,:12]
-        df.columns= ["close", "var", "open", "max", "min", "dateTime","trend","opA" ,"pClose", "tradeQ", "volume", "meanp"]
-        df= df.drop(columns=['trend', 'tradeQ','opA', 'pClose', 'meanp'], axis=1)
-        df['dateTime']=df['dateTime'].str.slice(0, 10)
+        df = df.iloc[:, :12]
+        df.columns = [
+            "close",
+            "var",
+            "open",
+            "max",
+            "min",
+            "dateTime",
+            "trend",
+            "opA",
+            "pClose",
+            "tradeQ",
+            "volume",
+            "meanp",
+        ]
+        df = df.drop(columns=["trend", "tradeQ", "opA", "pClose", "meanp"], axis=1)
+        df["dateTime"] = df["dateTime"].str.slice(0, 10)
         df["dateTime"] = pd.to_datetime(df.dateTime)
-        df=df[["close", "var", "open", "max", "min", "dateTime", "volume"]]
-        df['ticker']= (simbolo)
-        df["country"]= (pais)
-        df["asset"]= asset
-        df.set_index('dateTime', inplace=True)
-    
+        df = df[["close", "var", "open", "max", "min", "dateTime", "volume"]]
+        df["ticker"] = simbolo
+        df["country"] = pais
+        df["asset"] = "stocks"
+        df.set_index("dateTime", inplace=True)
         return df
 
-    # Genera una base de datos con las acciones de Argentina o EEUU
+    def get_hist_data_bond(self, mercado, simbolo, desde, hasta, pais, path, psw_iol, user_iol):
+        """Descarga series históricas para bonos."""
+        auth = self.get_token(user_iol, psw_iol)
+        response = requests.get(
+            f'{URL_API}/{mercado}/Titulos/{simbolo}/Cotizacion/seriehistorica/{desde}/{hasta}/sinajustar',
+            headers={"Content-Type": "application/x-www-form-urlencoded", "authorization": auth},
+        )
+        res = response.json()
+        df = pd.DataFrame(res)
+        df = df.iloc[:, :12]
+        df.columns = [
+            "close",
+            "var",
+            "open",
+            "max",
+            "min",
+            "dateTime",
+            "trend",
+            "opA",
+            "pClose",
+            "tradeQ",
+            "volume",
+            "meanp",
+        ]
+        df = df.drop(columns=["trend", "tradeQ", "opA", "pClose", "meanp"], axis=1)
+        df["dateTime"] = df["dateTime"].str.slice(0, 10)
+        df["dateTime"] = pd.to_datetime(df.dateTime)
+        df = df[["close", "var", "open", "max", "min", "dateTime", "volume"]]
+        df["ticker"] = simbolo
+        df["country"] = pais
+        df["asset"] = "bonds"
+        df.set_index("dateTime", inplace=True)
+        return df
 
-    def get_DB_iol(self, instrumento, mercado,panel, pais,   desde,  path, user_iol, pass_iol):
-        activos=[]
-        simbolos=  self.get_tickers_panel(instrumento="acciones", pais=pais, panel=panel,user_iol= user_iol, psw_iol= pass_iol)
-        for i in simbolos:
-            if not str(i+".csv") in os.listdir(path):
+    def get_hist_data_option(self, mercado, simbolo, desde, hasta, pais, path, psw_iol, user_iol):
+        """Descarga series históricas para opciones."""
+        auth = self.get_token(user_iol, psw_iol)
+        response = requests.get(
+            f'{URL_API}/{mercado}/Opciones/{simbolo}/Cotizacion/seriehistorica/{desde}/{hasta}',
+            headers={"Content-Type": "application/x-www-form-urlencoded", "authorization": auth},
+        )
+        res = response.json()
+        df = pd.DataFrame(res)
+        df = df.iloc[:, :12]
+        df.columns = [
+            "close",
+            "var",
+            "open",
+            "max",
+            "min",
+            "dateTime",
+            "trend",
+            "opA",
+            "pClose",
+            "tradeQ",
+            "volume",
+            "meanp",
+        ]
+        df = df.drop(columns=["trend", "tradeQ", "opA", "pClose", "meanp"], axis=1)
+        df["dateTime"] = df["dateTime"].str.slice(0, 10)
+        df["dateTime"] = pd.to_datetime(df.dateTime)
+        df = df[["close", "var", "open", "max", "min", "dateTime", "volume"]]
+        df["ticker"] = simbolo
+        df["country"] = pais
+        df["asset"] = "options"
+        df.set_index("dateTime", inplace=True)
+        return df
+
+    # Genera una base de datos con los instrumentos de IOL
+    def get_DB_iol(self, instrumento, mercado, panel, pais, desde, path, user_iol, pass_iol):
+        simbolos = self.get_tickers_panel(
+            instrumento=instrumento,
+            pais=pais,
+            panel=panel,
+            user_iol=user_iol,
+            psw_iol=pass_iol,
+        )
+        for simbolo in simbolos:
+            if not str(simbolo + ".csv") in os.listdir(path):
                 try:
-                    print(i)
-                    df= self.get_hist_data_iol(mercado= mercado,simbolo= i, desde=desde, hasta= date.today(),  pais= pais, path=path, psw_iol=pass_iol, user_iol= user_iol)
-                    df.to_csv(path+i+".csv")
-
+                    print(simbolo)
+                    if instrumento == "acciones":
+                        df = self.get_hist_data_iol(
+                            mercado=mercado,
+                            simbolo=simbolo,
+                            desde=desde,
+                            hasta=date.today(),
+                            pais=pais,
+                            path=path,
+                            psw_iol=pass_iol,
+                            user_iol=user_iol,
+                        )
+                    elif instrumento == "bonos":
+                        df = self.get_hist_data_bond(
+                            mercado=mercado,
+                            simbolo=simbolo,
+                            desde=desde,
+                            hasta=date.today(),
+                            pais=pais,
+                            path=path,
+                            psw_iol=pass_iol,
+                            user_iol=user_iol,
+                        )
+                    elif instrumento == "opciones":
+                        df = self.get_hist_data_option(
+                            mercado=mercado,
+                            simbolo=simbolo,
+                            desde=desde,
+                            hasta=date.today(),
+                            pais=pais,
+                            path=path,
+                            psw_iol=pass_iol,
+                            user_iol=user_iol,
+                        )
+                    else:
+                        raise ValueError("Instrumento no soportado")
+                    df.to_csv(path + simbolo + ".csv")
                 except Exception as e:
-                    print('error:', e)
-                except:
+                    print("error:", e)
+                except Exception:  # pragma: no cover - para mantener comportamiento previo
                     pass
 
 class binance:

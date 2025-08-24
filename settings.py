@@ -35,6 +35,8 @@ save_csv = True
 BASE_PATH = Path(__file__).resolve().parent
 dataset = BASE_PATH / "dataset"
 path_stocks = dataset / "acciones"
+path_bonds = dataset / "bonos"
+path_options = dataset / "opciones"
 path_crypto = dataset / "crypto"
 path_commodities = dataset / "commodities"
 path_indexes = dataset / "indices"
@@ -45,6 +47,8 @@ path_macro = dataset / "macro"
 # Crear los directorios en caso de que no existan
 for directory in (
     path_stocks,
+    path_bonds,
+    path_options,
     path_crypto,
     path_commodities,
     path_indexes,
